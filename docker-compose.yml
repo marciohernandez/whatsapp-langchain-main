@@ -1,0 +1,55 @@
+# Docker Compose para desenvolvimento local.
+# Sobe PostgreSQL (com pgvector), API e Worker.
+#
+# Uso:
+#   docker compose up -d         # Sobe tudo
+#   docker compose up -d db      # Só o banco
+#   docker compose logs -f       # Logs
+#   docker compose down          # Para tudo
+
+services:
+  db:
+    build:
+      context: .
+      dockerfile: Dockerfile.db
+    environment:
+      POSTGRES_DB: whatsapp_langchain
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/whatsapp_langchain
+      LOG_JSON: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/whatsapp_langchain
+      LOG_JSON: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
