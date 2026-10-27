@@ -1,18 +1,18 @@
-"""Processador de mensagens — orquestra agente, typing e envio Twilio.
+"""Processador de mensagens — orquestra agente, typing e envio WAHA.
 
 Responsável por:
 1. Pré-processar entrada (mídia -> texto)
 2. Enviar typing indicator (best-effort)
 3. Carregar o agente via loader (com checkpointer PostgreSQL)
 4. Executar o agente
-5. Enviar resposta ao usuário via Twilio
+5. Enviar resposta ao usuário via WAHA
 6. Salvar no banco (mark_done somente após envio confirmado)
 
 Decisões arquiteturais (Fase 3):
-- Twilio é obrigatório — não existe caminho sem envio confirmado.
+- O envio via WAHA é obrigatório — não existe caminho sem envio confirmado.
 - Typing é tentado em 100% das execuções normais (best-effort).
 - Falha de typing NÃO interrompe o processamento.
-- mark_done ocorre somente após envio Twilio bem-sucedido.
+- mark_done ocorre somente após envio WAHA bem-sucedido.
 - Falha de envio entra no fluxo de retry (mark_failed).
 
 Uso:
@@ -22,7 +22,7 @@ Uso:
         message, pool,
         checkpointer=checkpointer,
         store=store,
-        twilio=twilio,
+        waha=waha,
     )
 """
 
@@ -43,7 +43,7 @@ from whatsapp_langchain.worker.media import (
     AUTO_RESPONSE_MEDIA_FAILURE,
     preprocess_incoming_message,
 )
-from whatsapp_langchain.worker.twilio_client import TwilioClient
+from whatsapp_langchain.worker.waha_client import WahaClient
 
 logger = structlog.get_logger()
 
@@ -54,22 +54,22 @@ async def process_message(
     *,
     checkpointer: BaseCheckpointSaver,
     store: BaseStore | None = None,
-    twilio: TwilioClient,
+    waha: WahaClient,
 ) -> None:
     """Processa uma mensagem da fila com o agente apropriado.
 
     Faz download de mídia se presente, envia typing, carrega o grafo
     do agente com checkpointer PostgreSQL, executa, envia a resposta
-    via Twilio e salva no banco.
+    via WAHA e salva no banco.
 
-    Twilio é obrigatório — nenhum mark_done ocorre sem envio confirmado.
+    O envio é obrigatório — nenhum mark_done ocorre sem envio confirmado.
 
     Args:
         message: Mensagem a processar (já reservada via claim).
         pool: Pool de conexões do psycopg.
         checkpointer: Checkpointer LangGraph já inicializado no boot.
         store: Store LangGraph compartilhado (None se memória desabilitada).
-        twilio: Cliente Twilio para envio (obrigatório).
+        waha: Cliente WAHA para envio (obrigatório).
     """
     logger.info(
         "processing_message",
@@ -78,6 +78,9 @@ async def process_message(
         agent_id=message.agent_id,
         attempt=message.attempts,
     )
+
+    # Mensagens enfileiradas antes da migration 003 não têm chat_id
+    chat_id = message.chat_id or f"{message.phone_number.lstrip('+')}@c.us"
 
     try:
         # 1. Pré-processar entrada (mídia -> texto) antes do agente
@@ -91,8 +94,8 @@ async def process_message(
         if not pre.should_invoke_agent:
             auto_response = pre.auto_response or AUTO_RESPONSE_MEDIA_FAILURE
 
-            # Enviar auto-response via Twilio antes de marcar como done
-            await twilio.send_message(message.phone_number, auto_response)
+            # Enviar auto-response via WAHA antes de marcar como done
+            await waha.send_message(chat_id, auto_response)
 
             await mark_done(
                 pool,
@@ -119,7 +122,7 @@ async def process_message(
 
         # 2. Typing indicator (best-effort, falha não interrompe processamento)
         try:
-            await twilio.send_typing(message.phone_number, message.message_id)
+            await waha.send_typing(chat_id)
         except Exception as typing_err:
             logger.warning(
                 "typing_failed",
@@ -149,11 +152,12 @@ async def process_message(
             config=invoke_config,
         )
 
-        # 4. Extrair resposta
+        # 4. Extrair resposta e limpar o "digitando..." (best-effort)
         response_text = result["messages"][-1].content
+        await waha.stop_typing(chat_id)
 
-        # 5. Enviar resposta via Twilio (obrigatório antes de mark_done)
-        await twilio.send_message(message.phone_number, response_text)
+        # 5. Enviar resposta via WAHA (obrigatório antes de mark_done)
+        await waha.send_message(chat_id, response_text)
 
         # 6. mark_done somente após envio confirmado
         await mark_done(

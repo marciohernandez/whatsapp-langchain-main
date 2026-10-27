@@ -1,155 +1,120 @@
-"""Webhook do Twilio — processamento assíncrono via fila.
+"""Webhook do WAHA — processamento assíncrono via fila.
 
-Recebe mensagens do Twilio, valida, aplica rate limit, e coloca na fila
-para processamento pelo Worker. Retorna 200 imediatamente (TwiML vazio).
+Recebe os eventos do WAHA, descarta o que não é mensagem de usuário,
+deduplica reentregas, aplica rate limit e coloca na fila para o Worker.
+Retorna 200 imediatamente.
 
-Fluxo: Twilio -> POST /webhook/twilio -> Fila (PostgreSQL) -> Worker
+Fluxo: WAHA -> POST /webhook/waha -> Fila (PostgreSQL) -> Worker -> WAHA
+
+No WAHA, configure o webhook da sessão com o evento "message":
+    url:    http://<api>:8000/webhook/waha?agent=rhawk_assistant
+    events: ["message"]
 
 Uso:
-    curl -X POST ".../webhook/twilio?agent=rhawk_assistant" \
-         -d "MessageSid=SM123&From=whatsapp:+5511..."
+    curl -X POST ".../webhook/waha?agent=rhawk_assistant" \
+         -H "Content-Type: application/json" \
+         -d '{"event":"message","payload":{"id":"x","from":"5511...@c.us",
+              "fromMe":false,"body":"Olá"}}'
 """
 
 import structlog
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from whatsapp_langchain.agents.loader import AgentNotFoundError, list_agents
 from whatsapp_langchain.server.dependencies import (
     check_rate_limit,
-    validate_twilio_signature,
+    verify_waha_webhook,
 )
+from whatsapp_langchain.server.waha_events import WahaIgnored, parse_waha_event
 from whatsapp_langchain.shared.config import settings
 from whatsapp_langchain.shared.db import get_pool
-from whatsapp_langchain.shared.queue import enqueue_or_buffer
+from whatsapp_langchain.shared.queue import (
+    enqueue_or_buffer,
+    forget_inbound_message,
+    register_inbound_message,
+)
 
 logger = structlog.get_logger()
 
 router = APIRouter(tags=["webhook"])
 
-# TwiML vazio — indica ao Twilio que recebemos a mensagem
-EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>'
 
-
-@router.post("/webhook/twilio")
-async def webhook_twilio(
+@router.post("/webhook/waha")
+async def webhook_waha(
+    request: Request,
     agent: str = Query(
         description="ID do agente para processar a mensagem",
     ),
-    message_sid: str = Form(
-        default="",
-        alias="MessageSid",
-        description="ID da mensagem no Twilio (MessageSid).",
-    ),
-    from_number: str = Form(
-        default="",
-        alias="From",
-        description="Número remetente no formato whatsapp:+55...",
-    ),
-    to_number_form: str = Form(
-        default="",
-        alias="To",
-        description="Número de destino no formato whatsapp:+...",
-    ),
-    body: str = Form(
-        default="",
-        alias="Body",
-        description="Texto da mensagem (pode ser vazio em mensagens de mídia).",
-    ),
-    num_media_raw: str = Form(
-        default="0",
-        alias="NumMedia",
-        description="Quantidade de mídias anexadas.",
-    ),
-    media_url_form: str | None = Form(
-        default=None,
-        alias="MediaUrl0",
-        description="URL da primeira mídia (quando NumMedia > 0).",
-    ),
-    media_type_form: str | None = Form(
-        default=None,
-        alias="MediaContentType0",
-        description="MIME type da primeira mídia.",
-    ),
-    wa_id: str = Form(
-        default="",
-        alias="WaId",
-        description="WhatsApp ID do remetente (fallback de From).",
-    ),
-    _signature: None = Depends(validate_twilio_signature),
-) -> Response:
-    """Recebe webhook do Twilio e enfileira para processamento.
+    _auth: None = Depends(verify_waha_webhook),
+) -> dict[str, str]:
+    """Recebe um evento do WAHA e enfileira para processamento.
 
-    O Worker consome a mensagem da fila, executa o agente, e envia
-    a resposta via Twilio. Assinatura validada via HMAC-SHA1 (SDK oficial)
-    quando VALIDATE_TWILIO_SIGNATURE=true.
+    Eventos que não são mensagens de usuário (ack, status, grupos, mensagens
+    enviadas pela própria sessão) e reentregas são aceitos com 200 e ignorados,
+    para o WAHA não tentar reenviá-los.
 
     Args:
         agent: ID do agente (query param).
 
     Returns:
-        TwiML vazio com status 200.
+        {"status": "queued" | "buffered" | "ignored" | "duplicate" | "rate_limited"}
     """
-    # Verifica se o agente existe
-    available_agents = list_agents()
-    if agent not in available_agents:
+    if agent not in list_agents():
         raise AgentNotFoundError(agent)
 
-    # Sanitização de campos do Twilio recebidos via x-www-form-urlencoded.
-    # From vem como "whatsapp:+55...", WaId vem como "5511..." sem + (fallback).
-    phone_number = (from_number or "").replace("whatsapp:", "")
-    if not phone_number and wa_id:
-        # WaId pode vir sem + — normaliza para E.164
-        phone_number = wa_id if wa_id.startswith("+") else f"+{wa_id}"
-    body = body or ""
-    to_number = (to_number_form or "").replace("whatsapp:", "")
-    message_sid = message_sid or ""
-
-    # Rejeita webhook sem identidade de remetente (From e WaId ambos vazios)
-    if not phone_number:
-        logger.warning(
-            "webhook_missing_sender",
-            message_sid=message_sid,
-            from_raw=from_number,
-            wa_id_raw=wa_id,
-        )
-        raise HTTPException(
-            status_code=400,
-            detail="Missing sender identity (From/WaId)",
-        )
-
-    # Mídia (imagem, áudio)
     try:
-        num_media = int(num_media_raw or "0")
+        event = await request.json()
     except ValueError:
-        num_media = 0
-    media_url = media_url_form.strip() if (num_media > 0 and media_url_form) else None
-    media_type = (
-        media_type_form.strip() if (num_media > 0 and media_type_form) else None
-    )
+        raise HTTPException(status_code=400, detail="Invalid JSON body") from None
+    if not isinstance(event, dict):
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
 
-    # Rate limit
-    await check_rate_limit(phone_number)
+    inbound = parse_waha_event(event)
+    if isinstance(inbound, WahaIgnored):
+        logger.debug("webhook_waha_ignored", reason=inbound.reason)
+        return {"status": "ignored", "reason": inbound.reason}
 
-    # Enfileira a mensagem
+    # Rate limit: responde 200 para o WAHA não reentregar a mensagem descartada
+    try:
+        await check_rate_limit(inbound.phone_number)
+    except HTTPException as exc:
+        if exc.status_code != 429:
+            raise
+        return {"status": "rate_limited"}
+
     pool = await get_pool()
-    result = await enqueue_or_buffer(
-        pool=pool,
-        phone_number=phone_number,
-        agent_id=agent,
-        body=body,
-        media_url=media_url,
-        media_type=media_type,
-        to_number=to_number,
-        message_id=message_sid,
-        buffer_seconds=settings.message_buffer_seconds,
-    )
+
+    if inbound.message_id and not await register_inbound_message(
+        pool, inbound.message_id
+    ):
+        logger.info("webhook_waha_duplicate", message_id=inbound.message_id)
+        return {"status": "duplicate"}
+
+    try:
+        result = await enqueue_or_buffer(
+            pool=pool,
+            phone_number=inbound.phone_number,
+            agent_id=agent,
+            body=inbound.body,
+            media_url=inbound.media_url,
+            media_type=inbound.media_type,
+            to_number=inbound.to_number,
+            message_id=inbound.message_id or None,
+            buffer_seconds=settings.message_buffer_seconds,
+            chat_id=inbound.chat_id,
+        )
+    except Exception:
+        # Libera o ID para que a reentrega do WAHA não seja tratada como duplicada
+        if inbound.message_id:
+            await forget_inbound_message(pool, inbound.message_id)
+        raise
 
     logger.info(
-        "webhook_twilio_received",
-        phone=phone_number,
+        "webhook_waha_received",
+        phone=inbound.phone_number,
         agent_id=agent,
         message_id=result.message_id,
         buffered=result.is_buffered,
     )
 
-    return Response(content=EMPTY_TWIML, media_type="application/xml")
+    return {"status": "buffered" if result.is_buffered else "queued"}

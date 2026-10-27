@@ -10,7 +10,7 @@ Este guia tem duas trilhas:
 - `uv` (gerenciador de pacotes)
 - Docker + Docker Compose
 - conta OpenRouter (API key)
-- conta Twilio com sandbox WhatsApp (obrigatória para o Worker — veja [Integração Twilio](TWILIO.md), seções 1.1 e 1.2 para criação de conta/credenciais)
+- WAHA rodando e com uma sessão conectada (obrigatório para o Worker — veja [Integração WAHA](WAHA.md))
 
 ## 1. Setup local
 
@@ -27,11 +27,10 @@ Edite `.env` e configure no mínimo:
 OPENROUTER_API_KEY=sk-or-v1-...
 OPENROUTER_MIDIA_MODEL=google/gemini-2.5-flash-lite
 
-# Twilio (obrigatório para o Worker)
-TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-TWILIO_API_KEY_SID=SKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-TWILIO_API_KEY_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-TWILIO_FROM_NUMBER=whatsapp:+14155238886
+# WAHA (obrigatório para o Worker)
+WAHA_BASE_URL=http://waha:3000
+WAHA_API_KEY=
+WAHA_SESSION=default
 ```
 
 ## 2. Trilha A: desenvolvimento de agente no Studio
@@ -96,12 +95,10 @@ Use para debugging rápido sem fila.
 ### 4.2 Webhook assíncrono (arquitetura real)
 
 ```bash
-curl -X POST "http://localhost:8000/webhook/twilio?agent=rhawk_assistant" \
-  -d "MessageSid=SM123" \
-  -d "From=whatsapp:+5511999999999" \
-  -d "To=whatsapp:+14155238886" \
-  -d "Body=Mensagem de teste" \
-  -d "NumMedia=0"
+curl -X POST "http://localhost:8000/webhook/waha?agent=rhawk_assistant" \
+  -H "Content-Type: application/json" \
+  -d '{"event":"message","payload":{"id":"false_5511999999999@c.us_SM123",
+       "from":"5511999999999@c.us","fromMe":false,"body":"Mensagem de teste"}}'
 ```
 
 Depois consulte:
@@ -116,16 +113,11 @@ curl http://localhost:8000/api/chats/+5511999999999
 
 1. Abra `http://localhost:8000/docs`.
 2. Execute `GET /api/agents` e confirme `rhawk_assistant`.
-3. Abra `POST /webhook/twilio` e clique em `Try it out`.
-4. Preencha:
-   - `agent` (query): `rhawk_assistant`
-   - `MessageSid`: `SMDOCS001`
-   - `From`: `whatsapp:+5511999999999`
-   - `To`: `whatsapp:+14155238886`
-   - `Body`: `Mensagem de teste via Swagger`
-   - `NumMedia`: `0`
+3. Abra `POST /webhook/waha` e clique em `Try it out`.
+4. Preencha `agent` (query) com `rhawk_assistant` e use o body JSON:
+   `{"event":"message","payload":{"id":"false_DOCS001","from":"5511999999999@c.us","fromMe":false,"body":"Mensagem de teste via Swagger"}}`
 5. Execute e verifique:
-   - resposta `200` com TwiML vazio
+   - resposta `200` com `{"status":"queued"}`
    - dados em `GET /api/chats/+5511999999999`
 
 ### 4.3 Teste de memória semântica (save + recall via tools)
@@ -133,23 +125,19 @@ curl http://localhost:8000/api/chats/+5511999999999
 1. Envie uma mensagem pedindo para salvar um fato:
 
 ```bash
-curl -X POST "http://localhost:8000/webhook/twilio?agent=rhawk_assistant" \
-  -d "MessageSid=SMMEM001" \
-  -d "From=whatsapp:+5511999999999" \
-  -d "To=whatsapp:+14155238886" \
-  -d "Body=Use a ferramenta save_memory e salve este fato: meu código é codex-12345" \
-  -d "NumMedia=0"
+curl -X POST "http://localhost:8000/webhook/waha?agent=rhawk_assistant" \
+  -H "Content-Type: application/json" \
+  -d '{"event":"message","payload":{"id":"false_5511999999999@c.us_SMMEM001",
+       "from":"5511999999999@c.us","fromMe":false,"body":"Use a ferramenta save_memory e salve este fato: meu código é codex-12345"}}'
 ```
 
 2. Envie outra mensagem pedindo recall explícito:
 
 ```bash
-curl -X POST "http://localhost:8000/webhook/twilio?agent=rhawk_assistant" \
-  -d "MessageSid=SMMEM002" \
-  -d "From=whatsapp:+5511999999999" \
-  -d "To=whatsapp:+14155238886" \
-  -d "Body=Sem salvar nada novo agora, use read_memory e me diga meu código" \
-  -d "NumMedia=0"
+curl -X POST "http://localhost:8000/webhook/waha?agent=rhawk_assistant" \
+  -H "Content-Type: application/json" \
+  -d '{"event":"message","payload":{"id":"false_5511999999999@c.us_SMMEM002",
+       "from":"5511999999999@c.us","fromMe":false,"body":"Sem salvar nada novo agora, use read_memory e me diga meu código"}}'
 ```
 
 3. Verifique evidências no banco:
@@ -261,7 +249,7 @@ grep OPENROUTER_API_KEY .env
 
 ## Próximos passos
 
-- [Integração Twilio](TWILIO.md)
+- [Integração WAHA](WAHA.md)
 - [Arquitetura](ARCHITECTURE.md)
 - [Criando Agentes](ADDING_AGENTS.md)
 - [Banco de Dados](DATABASE.md)

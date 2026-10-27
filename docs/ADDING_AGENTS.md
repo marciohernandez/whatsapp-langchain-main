@@ -115,7 +115,7 @@ Quando `store` é fornecido:
 
 Para funcionar corretamente, o runtime precisa receber:
 - `thread_id` (conversa)
-- `user_id` (identidade do usuário; neste projeto vem do telefone no payload do Twilio)
+- `user_id` (identidade do usuário; neste projeto vem do telefone no payload do WAHA)
 
 Exemplo de `config` em invoke:
 

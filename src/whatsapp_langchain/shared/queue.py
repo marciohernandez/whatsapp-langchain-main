@@ -36,6 +36,7 @@ async def enqueue_or_buffer(
     to_number: str | None = None,
     message_id: str | None = None,
     buffer_seconds: float = 2.0,
+    chat_id: str | None = None,
 ) -> EnqueueResult:
     """Insere mensagem na fila ou agrupa com mensagem pendente (debounce).
 
@@ -56,8 +57,9 @@ async def enqueue_or_buffer(
         media_url: URL de mídia anexada (opcional).
         media_type: MIME type da mídia (opcional).
         to_number: Número destinatário (opcional).
-        message_id: ID externo da mensagem, ex: Twilio MessageSid (opcional).
+        message_id: ID externo da mensagem, ex: id da mensagem no WAHA (opcional).
         buffer_seconds: Segundos de debounce. Default: 2.0.
+        chat_id: chatId do WhatsApp usado para responder (opcional).
 
     Returns:
         EnqueueResult com message_id e se foi buffered.
@@ -110,8 +112,8 @@ async def enqueue_or_buffer(
                 INSERT INTO message_queue
                     (message_id, phone_number, to_number, agent_id,
                      thread_id, incoming_message, media_url, media_type,
-                     process_after)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                     process_after, chat_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s)
                 RETURNING id
                 """,
                 (
@@ -123,6 +125,7 @@ async def enqueue_or_buffer(
                     body,
                     media_url,
                     media_type,
+                    chat_id,
                 ),
             )
             row = await cursor.fetchone()
@@ -189,8 +192,8 @@ async def enqueue_or_buffer(
             """
             INSERT INTO message_queue
                 (message_id, phone_number, to_number, agent_id, thread_id,
-                 incoming_message, media_url, media_type, process_after)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 incoming_message, media_url, media_type, process_after, chat_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             (
@@ -203,6 +206,7 @@ async def enqueue_or_buffer(
                 None,
                 None,
                 process_after,
+                chat_id,
             ),
         )
         row = await cursor.fetchone()
@@ -287,7 +291,8 @@ async def claim_next(
                       normalized_input, media_processing_status, media_processing_error,
                       status,
                       process_after, attempts, max_attempts, lease_until,
-                      response, error, created_at, updated_at, processed_at
+                      response, error, created_at, updated_at, processed_at,
+                      chat_id
             """,
             (lease_until,),
         )
@@ -320,6 +325,7 @@ async def claim_next(
             created_at=row[19],
             updated_at=row[20],
             processed_at=row[21],
+            chat_id=row[22],
         )
 
         logger.info(
@@ -480,5 +486,48 @@ async def upsert_conversation(
                 updated_at = NOW()
             """,
             (phone_number, agent_id, thread_id, last_message),
+        )
+        await conn.commit()
+
+
+async def register_inbound_message(
+    pool: AsyncConnectionPool,
+    message_id: str,
+) -> bool:
+    """Registra o ID de uma mensagem de entrada para deduplicar reentregas.
+
+    Args:
+        pool: Pool de conexões do psycopg.
+        message_id: ID externo da mensagem (WAHA).
+
+    Returns:
+        True se é a primeira vez que o ID é visto; False se é duplicado.
+    """
+    async with pool.connection() as conn:
+        cursor = await conn.execute(
+            """
+            INSERT INTO inbound_dedupe (message_id)
+            VALUES (%s)
+            ON CONFLICT (message_id) DO NOTHING
+            """,
+            (message_id,),
+        )
+        await conn.commit()
+        return cursor.rowcount == 1
+
+
+async def forget_inbound_message(
+    pool: AsyncConnectionPool,
+    message_id: str,
+) -> None:
+    """Remove o registro de dedupe (usado quando o enqueue falha).
+
+    Sem isso, a reentrega do WAHA seria descartada como duplicada e a
+    mensagem se perderia.
+    """
+    async with pool.connection() as conn:
+        await conn.execute(
+            "DELETE FROM inbound_dedupe WHERE message_id = %s",
+            (message_id,),
         )
         await conn.commit()

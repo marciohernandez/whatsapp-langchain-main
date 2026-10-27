@@ -29,9 +29,31 @@ def unique_phone(ddd: str = "99") -> str:
     return f"+55{ddd}{uuid.uuid4().int % 10**8:08d}"
 
 
-def unique_sid(prefix: str = "SM") -> str:
-    """Gera MessageSid único no formato do Twilio."""
+def unique_sid(prefix: str = "false_") -> str:
+    """Gera ID de mensagem único no estilo do WAHA."""
     return f"{prefix}{uuid.uuid4().hex[:12]}"
+
+
+def waha_event(
+    phone: str,
+    body: str,
+    message_id: str,
+    media_url: str | None = None,
+    media_type: str | None = None,
+) -> dict:
+    """Monta um evento "message" do WAHA."""
+    user = phone.lstrip("+")
+    payload: dict = {
+        "id": message_id,
+        "from": f"{user}@c.us",
+        "to": "5500000000000@c.us",
+        "fromMe": False,
+        "body": body,
+        "hasMedia": media_url is not None,
+    }
+    if media_url:
+        payload["media"] = {"url": media_url, "mimetype": media_type}
+    return {"event": "message", "session": "default", "payload": payload}
 
 
 # ---------------------------------------------------------------------------
@@ -251,17 +273,11 @@ def send_webhook(
     message_sid: str | None = None,
     timeout: int = 10,
 ) -> httpx.Response:
-    """Envia POST para /webhook/twilio simulando mensagem do Twilio."""
+    """Envia POST para /webhook/waha simulando um evento de mensagem do WAHA."""
     sid = message_sid or unique_sid()
     return httpx.post(
-        f"{API_BASE_URL}/webhook/twilio?agent={agent}",
-        data={
-            "MessageSid": sid,
-            "From": f"whatsapp:{phone}",
-            "To": "whatsapp:+14155238886",
-            "Body": body,
-            "NumMedia": "0",
-        },
+        f"{API_BASE_URL}/webhook/waha?agent={agent}",
+        json=waha_event(phone, body, sid),
         timeout=timeout,
     )
 

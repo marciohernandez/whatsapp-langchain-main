@@ -220,7 +220,7 @@ class TestMediaNoDebounce:
             phone_number="+5511999999999",
             agent_id="assistant",
             body="",
-            media_url="https://api.twilio.com/media/img.jpg",
+            media_url="http://waha:3000/api/files/default/img.jpg",
             media_type="image/jpeg",
         )
 
@@ -243,7 +243,7 @@ class TestMediaNoDebounce:
             phone_number="+5511999999999",
             agent_id="assistant",
             body="Foto do recibo",
-            media_url="https://api.twilio.com/media/img.jpg",
+            media_url="http://waha:3000/api/files/default/img.jpg",
             media_type="image/jpeg",
         )
 
@@ -265,7 +265,7 @@ class TestMediaNoDebounce:
             phone_number="+5511999999999",
             agent_id="assistant",
             body="Olha essa foto",
-            media_url="https://api.twilio.com/media/img.jpg",
+            media_url="http://waha:3000/api/files/default/img.jpg",
             media_type="image/jpeg",
         )
 
@@ -275,7 +275,7 @@ class TestMediaNoDebounce:
         # Body é preservado na mídia
         assert insert_params[5] == "Olha essa foto"
         # media_url e media_type presentes
-        assert insert_params[6] == "https://api.twilio.com/media/img.jpg"
+        assert insert_params[6] == "http://waha:3000/api/files/default/img.jpg"
         assert insert_params[7] == "image/jpeg"
 
 
@@ -292,7 +292,7 @@ class TestMediaFlushPendingText:
             phone_number="+5511999999999",
             agent_id="assistant",
             body="",
-            media_url="https://api.twilio.com/media/img.jpg",
+            media_url="http://waha:3000/api/files/default/img.jpg",
             media_type="image/jpeg",
         )
 
@@ -319,7 +319,7 @@ class TestMediaFlushPendingText:
             phone_number="+5511111111111",
             agent_id="bot_a",
             body="",
-            media_url="https://api.twilio.com/media/audio.ogg",
+            media_url="http://waha:3000/api/files/default/audio.ogg",
             media_type="audio/ogg",
         )
 
@@ -338,7 +338,7 @@ class TestMediaFlushPendingText:
             phone_number="+5511999999999",
             agent_id="assistant",
             body="",
-            media_url="https://api.twilio.com/media/img.jpg",
+            media_url="http://waha:3000/api/files/default/img.jpg",
             media_type="image/jpeg",
         )
 
@@ -355,7 +355,7 @@ class TestMediaFlushPendingText:
             phone_number="+5511999999999",
             agent_id="assistant",
             body="",
-            media_url="https://api.twilio.com/media/img2.jpg",
+            media_url="http://waha:3000/api/files/default/img2.jpg",
             media_type="image/jpeg",
         )
 
@@ -495,7 +495,7 @@ class TestSequentialTextThenMedia:
             phone_number="+5511999999999",
             agent_id="assistant",
             body="Foto",
-            media_url="https://api.twilio.com/media/img.jpg",
+            media_url="http://waha:3000/api/files/default/img.jpg",
             media_type="image/jpeg",
         )
 
@@ -635,7 +635,7 @@ class TestAdvisoryLock:
             phone_number="+5511999999999",
             agent_id="assistant",
             body="",
-            media_url="https://api.twilio.com/media/img.jpg",
+            media_url="http://waha:3000/api/files/default/img.jpg",
             media_type="image/jpeg",
         )
 

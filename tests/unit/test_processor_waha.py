@@ -13,7 +13,7 @@ import pytest
 
 from whatsapp_langchain.shared.models import MessageQueue
 from whatsapp_langchain.worker.media import MediaPreprocessResult
-from whatsapp_langchain.worker.twilio_client import TwilioSendError
+from whatsapp_langchain.worker.waha_client import WahaSendError
 
 # --- Fixtures ---
 
@@ -23,7 +23,8 @@ def message():
     """Mensagem de texto padrão para testes."""
     return MessageQueue(
         id=1,
-        message_id="SM123",
+        message_id="false_5511999999999@c.us_A1",
+        chat_id="5511999999999@c.us",
         phone_number="+5511999999999",
         agent_id="rhawk_assistant",
         thread_id="+5511999999999:rhawk_assistant",
@@ -36,23 +37,24 @@ def media_message():
     """Mensagem com mídia desabilitada/falha para testar auto-response."""
     return MessageQueue(
         id=2,
-        message_id="MM456",
+        message_id="false_5511999999999@c.us_B2",
+        chat_id="5511999999999@c.us",
         phone_number="+5511999999999",
         agent_id="rhawk_assistant",
         thread_id="+5511999999999:rhawk_assistant",
         incoming_message="",
-        media_url="https://api.twilio.com/media/test.jpg",
+        media_url="http://waha:3000/api/files/default/test.jpg",
         media_type="image/jpeg",
     )
 
 
 @pytest.fixture
-def mock_twilio():
-    """TwilioClient mock com send_message e send_typing."""
-    twilio = AsyncMock()
-    twilio.send_typing = AsyncMock(return_value=True)
-    twilio.send_message = AsyncMock(return_value="SM_RESPONSE_123")
-    return twilio
+def mock_waha():
+    """WahaClient mock com send_message e send_typing."""
+    waha = AsyncMock()
+    waha.send_typing = AsyncMock(return_value=True)
+    waha.send_message = AsyncMock(return_value="true_5511999999999@c.us_ABC")
+    return waha
 
 
 # --- Helpers ---
@@ -102,7 +104,7 @@ MEDIA_DISABLED_PREPROCESS = MediaPreprocessResult(
 class TestSendMessageMarkDone:
     """Garante que mark_done só ocorre após send_message bem-sucedido."""
 
-    async def test_mark_done_after_successful_send(self, message, mock_twilio):
+    async def test_mark_done_after_successful_send(self, message, mock_waha):
         """Fluxo feliz: send_message ok → mark_done chamado."""
         patches = _patch_processor(TEXT_PREPROCESS)
         with (
@@ -124,22 +126,22 @@ class TestSendMessageMarkDone:
                 message,
                 AsyncMock(),
                 checkpointer=AsyncMock(),
-                twilio=mock_twilio,
+                waha=mock_waha,
             )
 
             # send_message chamado com a resposta do agente
-            mock_twilio.send_message.assert_awaited_once_with(
-                "+5511999999999", "Resposta do agente"
+            mock_waha.send_message.assert_awaited_once_with(
+                "5511999999999@c.us", "Resposta do agente"
             )
             # mark_done chamado
             assert mock_done.await_count == 1
             # mark_failed NÃO chamado
             mock_failed.assert_not_awaited()
 
-    async def test_mark_done_not_called_when_send_fails(self, message, mock_twilio):
+    async def test_mark_done_not_called_when_send_fails(self, message, mock_waha):
         """send_message falha → mark_done NÃO é chamado, mark_failed SIM."""
-        mock_twilio.send_message = AsyncMock(
-            side_effect=TwilioSendError(500, "Internal Server Error")
+        mock_waha.send_message = AsyncMock(
+            side_effect=WahaSendError(500, "Internal Server Error")
         )
 
         patches = _patch_processor(TEXT_PREPROCESS)
@@ -162,11 +164,11 @@ class TestSendMessageMarkDone:
                 message,
                 AsyncMock(),
                 checkpointer=AsyncMock(),
-                twilio=mock_twilio,
+                waha=mock_waha,
             )
 
             # send_message foi chamado (e falhou)
-            mock_twilio.send_message.assert_awaited_once()
+            mock_waha.send_message.assert_awaited_once()
             # mark_done NÃO chamado
             mock_done.assert_not_awaited()
             # mark_failed chamado com o erro
@@ -174,11 +176,9 @@ class TestSendMessageMarkDone:
             error_arg = mock_failed.call_args[0][2]
             assert "500" in error_arg
 
-    async def test_mark_failed_on_generic_send_exception(self, message, mock_twilio):
+    async def test_mark_failed_on_generic_send_exception(self, message, mock_waha):
         """Exceção genérica no send_message → mark_failed."""
-        mock_twilio.send_message = AsyncMock(
-            side_effect=Exception("Connection timeout")
-        )
+        mock_waha.send_message = AsyncMock(side_effect=Exception("Connection timeout"))
 
         patches = _patch_processor(TEXT_PREPROCESS)
         with (
@@ -200,7 +200,7 @@ class TestSendMessageMarkDone:
                 message,
                 AsyncMock(),
                 checkpointer=AsyncMock(),
-                twilio=mock_twilio,
+                waha=mock_waha,
             )
 
             mock_done.assert_not_awaited()
@@ -211,11 +211,11 @@ class TestSendMessageMarkDone:
 # === Testes do fluxo auto-response (mídia) ===
 
 
-class TestAutoResponseTwilio:
-    """Garante que auto-response de mídia também envia via Twilio antes de mark_done."""
+class TestAutoResponseWaha:
+    """Garante que auto-response de mídia também envia via WAHA antes de mark_done."""
 
-    async def test_auto_response_sends_via_twilio(self, media_message, mock_twilio):
-        """Auto-response de mídia desabilitada envia via Twilio antes de mark_done."""
+    async def test_auto_response_sends_via_waha(self, media_message, mock_waha):
+        """Auto-response de mídia desabilitada envia via WAHA antes de mark_done."""
         patches = _patch_processor(MEDIA_DISABLED_PREPROCESS)
         with (
             patches[0],
@@ -230,12 +230,12 @@ class TestAutoResponseTwilio:
                 media_message,
                 AsyncMock(),
                 checkpointer=AsyncMock(),
-                twilio=mock_twilio,
+                waha=mock_waha,
             )
 
-            # Auto-response enviada via Twilio
-            mock_twilio.send_message.assert_awaited_once_with(
-                "+5511999999999",
+            # Auto-response enviada via WAHA
+            mock_waha.send_message.assert_awaited_once_with(
+                "5511999999999@c.us",
                 "Imagens estão desabilitadas neste momento.",
             )
             # mark_done chamado após envio
@@ -243,11 +243,11 @@ class TestAutoResponseTwilio:
             mock_failed.assert_not_awaited()
 
     async def test_auto_response_mark_failed_when_send_fails(
-        self, media_message, mock_twilio
+        self, media_message, mock_waha
     ):
         """Auto-response falha no envio → mark_failed (retry)."""
-        mock_twilio.send_message = AsyncMock(
-            side_effect=TwilioSendError(503, "Service Unavailable")
+        mock_waha.send_message = AsyncMock(
+            side_effect=WahaSendError(503, "Service Unavailable")
         )
 
         patches = _patch_processor(MEDIA_DISABLED_PREPROCESS)
@@ -264,11 +264,11 @@ class TestAutoResponseTwilio:
                 media_message,
                 AsyncMock(),
                 checkpointer=AsyncMock(),
-                twilio=mock_twilio,
+                waha=mock_waha,
             )
 
             # send_message foi chamado (e falhou)
-            mock_twilio.send_message.assert_awaited_once()
+            mock_waha.send_message.assert_awaited_once()
             # mark_done NÃO chamado
             mock_done.assert_not_awaited()
             # mark_failed chamado
