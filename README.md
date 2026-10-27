@@ -17,7 +17,7 @@ O objetivo deste repositório é ensinar arquitetura de sistemas em volta do age
 **Fase 3 concluída no código.**
 
 Já implementado no código:
-- API FastAPI com webhook Twilio assíncrono (`/webhook/twilio`)
+- API FastAPI com webhook WAHA assíncrono (`/webhook/waha`)
 - fila em PostgreSQL com debounce e retry
 - worker assíncrono para processamento LangGraph
 - bootstrap de schema LangGraph no startup (sem criação lazy no primeiro request)
@@ -30,10 +30,10 @@ Já implementado no código:
 - rate limit por telefone (in-memory)
 - rotas administrativas (`/api/agents`, `/api/chats`, `/api/metrics`)
 - endpoint síncrono educacional (`/webhook/sync`)
-- validação criptográfica de `X-Twilio-Signature`
-- envio real de resposta via Twilio Messages API
-- typing indicator via Twilio antes do processamento
-- documentação de sandbox/webhook/túnel com cloudflared
+- autenticação do webhook por HMAC e/ou token
+- filtro de `fromMe`, grupos e eventos que não são mensagem; dedupe de reentregas
+- envio real de resposta via WAHA (`/api/sendText`)
+- typing indicator via WAHA antes do processamento
 
 Fase 4 será o fechamento operacional do projeto:
 - frontend/admin panel integrado neste repositório
@@ -47,7 +47,7 @@ Fase 4 será o fechamento operacional do projeto:
 Fluxo principal:
 
 ```text
-WhatsApp/Twilio -> API (/webhook/twilio) -> PostgreSQL (message_queue)
+WhatsApp/WAHA -> API (/webhook/waha) -> PostgreSQL (message_queue)
                                               -> Worker -> LangGraph Agent
                                               -> PostgreSQL (response, conversation)
 ```
@@ -102,15 +102,13 @@ curl -X POST "http://localhost:8000/webhook/sync?agent=rhawk_assistant" \
   -d '{"phone":"+5511999999999","message":"Olá!"}'
 ```
 
-### 4. Teste assíncrono (simulando Twilio)
+### 4. Teste assíncrono (simulando o WAHA)
 
 ```bash
-curl -X POST "http://localhost:8000/webhook/twilio?agent=rhawk_assistant" \
-  -d "MessageSid=SM123" \
-  -d "From=whatsapp:+5511999999999" \
-  -d "To=whatsapp:+14155238886" \
-  -d "Body=Quero aprender sistemas de agentes" \
-  -d "NumMedia=0"
+curl -X POST "http://localhost:8000/webhook/waha?agent=rhawk_assistant" \
+  -H "Content-Type: application/json" \
+  -d '{"event":"message","payload":{"id":"false_5511999999999@c.us_T1",
+       "from":"5511999999999@c.us","fromMe":false,"body":"Quero aprender sistemas de agentes"}}'
 ```
 
 Acompanhe métricas:
@@ -148,7 +146,7 @@ Para detalhes técnicos:
 - [Primeiros Passos](docs/GETTING_STARTED.md)
 - [Criando Agentes](docs/ADDING_AGENTS.md)
 - [Banco de Dados](docs/DATABASE.md)
-- [Integração Twilio](docs/TWILIO.md)
+- [Integração WAHA](docs/WAHA.md)
 - [Deploy](docs/DEPLOY.md)
 
 
@@ -172,7 +170,7 @@ make test-demo
 
 - **Fase 1** concluída: base de agentes + middleware de contexto
 - **Fase 2** concluída: API + Worker + PostgreSQL + observabilidade operacional
-- **Fase 3** concluída: integração Twilio + assinatura real + typing + reforço dos testes de debounce
+- **Fase 3** concluída: integração WAHA + autenticação do webhook + typing + reforço dos testes de debounce
 - **Fase 4** em aberto: frontend/admin panel + deploy + stress + hardening final
 
 ## Licença

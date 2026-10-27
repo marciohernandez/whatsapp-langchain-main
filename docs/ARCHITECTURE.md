@@ -7,7 +7,7 @@ entrada confiável, processamento assíncrono, persistência, recuperação de f
 ## Estado Atual (Fase 2 concluída)
 
 Implementado:
-- API FastAPI com webhook Twilio assíncrono (`POST /webhook/twilio`)
+- API FastAPI com webhook WAHA assíncrono (`POST /webhook/waha`)
 - fila em PostgreSQL (`message_queue`) com debounce e lease
 - worker assíncrono consumindo fila com `FOR UPDATE SKIP LOCKED`
 - execução de agentes via loader dinâmico
@@ -20,8 +20,8 @@ Implementado:
 - APIs administrativas para inspeção
 
 Fora do escopo da Fase 2:
-- envio de resposta via API Twilio no worker
-- validação criptográfica completa da assinatura Twilio
+- envio de resposta via API do WAHA no worker
+- autenticação do webhook por HMAC e/ou token
 - frontend/admin panel neste repositório
 
 ## Visão de Componentes
@@ -29,7 +29,7 @@ Fora do escopo da Fase 2:
 ![Arquitetura](architecture.png)
 
 ```text
-[Twilio/WhatsApp]
+[WAHA/WhatsApp]
       |
       v
 [API FastAPI]
@@ -57,14 +57,14 @@ Fora do escopo da Fase 2:
 ### API (`src/whatsapp_langchain/server/`)
 
 Responsabilidades:
-- aceitar webhook Twilio
-- responder rápido com TwiML vazio
+- aceitar webhook WAHA (descartando `fromMe`, grupos e eventos que não são mensagem)
+- responder rápido com `{"status": ...}`
 - não executar agente inline
 - enfileirar payload normalizado
 
 Contratos relevantes:
 - `agent` via query string
-- payload form-encoded Twilio (`From`, `To`, `Body`, `NumMedia`, etc)
+- payload JSON do evento `message` do WAHA (`payload.from`, `body`, `media`, etc)
 - `thread_id = "{phone}:{agent}"`
 
 ### Worker (`src/whatsapp_langchain/worker/`)
@@ -78,7 +78,7 @@ Responsabilidades:
 
 Contrato de execução do agente:
 - `thread_id`: memória de conversa (checkpointer)
-- `user_id`: memória cross-thread (store semântico), derivado do telefone do webhook Twilio
+- `user_id`: memória cross-thread (store semântico), derivado do telefone do webhook WAHA
 
 ### Shared (`src/whatsapp_langchain/shared/`)
 
@@ -119,7 +119,7 @@ Tabela agregada para consultas administrativas.
 ## Fluxo End-to-End
 
 1. Usuário envia mensagem no WhatsApp.
-2. Twilio faz `POST /webhook/twilio?agent=<agent_id>`.
+2. WAHA faz `POST /webhook/waha?agent=<agent_id>`.
 3. API valida agente, aplica rate limit e chama `enqueue_or_buffer`.
 4. Debounce concatena mensagens rápidas do mesmo usuário/agente.
 5. Worker faz `claim_next` com lease.
@@ -142,7 +142,7 @@ Persistência de mensagens de uma conversa específica (`thread_id`).
 - namespace: `(user_id, "memories")`
 - `save_memory` grava fatos relevantes
 - `read_memory` recupera memórias por similaridade quando o agente precisar
-- `user_id` no runtime vem de `phone_number` (payload Twilio)
+- `user_id` no runtime vem de `phone_number` (payload WAHA)
 - não usamos escopo `tenant_user`/`tenant_shared` neste projeto
 
 Isso separa duas necessidades diferentes:
@@ -171,7 +171,7 @@ Logs estruturados com `structlog` em todos os componentes.
 ## Endpoints Disponíveis
 
 - `GET /health`
-- `POST /webhook/twilio?agent=<id>`
+- `POST /webhook/waha?agent=<id>`
 - `POST /webhook/sync?agent=<id>` (educacional)
 - `GET /api/agents`
 - `GET /api/chats`
@@ -189,7 +189,6 @@ Logs estruturados com `structlog` em todos os componentes.
 
 ## Próximos passos de arquitetura
 
-- integrar envio de saída via Twilio no worker
-- validação real da assinatura Twilio com SDK oficial
+- suporte a múltiplas sessões WAHA por deploy
 - endurecimento para multi-instância (rate limit distribuído)
 - camada de frontend/admin externa a este pacote

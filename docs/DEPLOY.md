@@ -10,7 +10,7 @@ Objetivo: publicar a arquitetura de processamento assíncrono com persistência 
 ## Escopo desta fase
 
 Incluído:
-- webhook Twilio assíncrono (`/webhook/twilio`)
+- webhook WAHA assíncrono (`/webhook/waha`)
 - fila em PostgreSQL
 - execução de agente no worker
 - contexto por checkpointer
@@ -18,8 +18,7 @@ Incluído:
 - rotas administrativas e health check
 
 Ainda não incluído como fluxo completo de produção:
-- envio de resposta para WhatsApp via API Twilio
-- validação completa de assinatura Twilio
+- múltiplas sessões WAHA no mesmo deploy
 
 ## Topologia mínima de produção
 
@@ -56,7 +55,7 @@ Recomendadas para operação:
 2. Subir API (aplica migrações no startup).
 3. Subir Worker (também valida/aplica migrações).
 4. Verificar `GET /health`.
-5. Enviar mensagem de teste para `/webhook/twilio`.
+5. Enviar mensagem de teste para `/webhook/waha`.
 6. Acompanhar `/api/metrics` e logs.
 
 ## Deploy com Docker (referência)
@@ -104,6 +103,4 @@ docker compose logs -f api worker db
 ## Próxima evolução
 
 Ao avançar para fases seguintes:
-- integrar envio de resposta via Twilio no worker
-- validar assinatura Twilio com SDK oficial
 - publicar frontend/admin panel desacoplado

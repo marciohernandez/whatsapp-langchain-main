@@ -40,17 +40,19 @@ class Settings(BaseSettings):
     log_level: str = "info"
     log_json: bool = False  # True em prod para logs estruturados
 
-    # --- Twilio ---
-    # Inbound (validação de assinatura no webhook)
-    validate_twilio_signature: bool = False
-    twilio_auth_token: str = ""
-    twilio_webhook_url: str = ""
+    # --- WAHA (WhatsApp HTTP API) ---
+    # Um deploy = um agente = uma sessão WAHA.
+    # Outbound (worker -> WAHA): envio de texto, typing e download de mídia
+    waha_base_url: str = ""
+    waha_api_key: SecretStr | None = None
+    waha_session: str = "default"
 
-    # Outbound (envio de mensagens pelo worker via API Key)
-    twilio_account_sid: str = ""
-    twilio_api_key_sid: str = ""
-    twilio_api_key_secret: str = ""
-    twilio_from_number: str = ""
+    # Inbound (WAHA -> webhook). Se nenhum dos dois estiver configurado,
+    # o webhook aceita qualquer request (apenas dev local).
+    # HMAC: configure o mesmo valor em hmac.key do webhook no WAHA
+    waha_webhook_hmac_key: SecretStr | None = None
+    # Token estático: header X-Webhook-Token (customHeaders do webhook no WAHA)
+    waha_webhook_token: SecretStr | None = None
 
     # --- Rate Limit ---
     rate_limit_per_hour: int = 30

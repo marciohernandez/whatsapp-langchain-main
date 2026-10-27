@@ -50,21 +50,22 @@ class MediaPreprocessResult:
 async def download_media(
     url: str,
 ) -> bytes:
-    """Faz download de mídia do Twilio.
+    """Faz download de mídia entregue pelo WAHA.
 
-    Autentica com API Key (api_key_sid:api_key_secret) — mesmas credenciais
-    usadas pelo TwilioClient para envio outbound.
+    Delega ao WahaClient, que reaproveita só o path da URL e envia a API key
+    apenas para o WAHA_BASE_URL configurado.
     """
-    auth = (
-        (settings.twilio_api_key_sid, settings.twilio_api_key_secret)
-        if settings.twilio_api_key_sid
-        else None
-    )
+    # Import local: WahaClient valida a config no construtor
+    from whatsapp_langchain.worker.waha_client import WahaClient
 
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url, auth=auth, follow_redirects=True)
-        response.raise_for_status()
-        return response.content
+    client = WahaClient(
+        base_url=settings.waha_base_url,
+        api_key=settings.waha_api_key.get_secret_value()
+        if settings.waha_api_key
+        else "",
+        session=settings.waha_session,
+    )
+    return await client.download_media(url)
 
 
 def _media_kind(media_type: str | None) -> str:

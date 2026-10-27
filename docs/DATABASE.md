@@ -22,8 +22,9 @@ Controle das migrações SQL locais (`db/migrations/*.sql`).
 Fila operacional de mensagens.
 
 Campos principais:
-- `message_id`: id externo (ex: Twilio MessageSid)
+- `message_id`: id externo (id da mensagem no WAHA)
 - `phone_number`, `agent_id`, `thread_id`
+- `chat_id`: chatId do WhatsApp usado para responder (ex: `5511...@c.us`)
 - `incoming_message`: entrada original
 - `media_url`, `media_type`
 - `normalized_input`: texto final enviado ao agente (quando houver)
@@ -188,3 +189,8 @@ LIMIT 50;
 - Recall é observado no output final (`message_queue.response`) e nos logs do worker (`memory_read`).
 - `message_queue.status='done'` significa ciclo encerrado com resposta ao usuário,
   inclusive respostas automáticas quando mídia está desabilitada ou falha.
+
+### `inbound_dedupe`
+
+IDs de mensagens de entrada já aceitas (`message_id` é PK). Evita enfileirar duas vezes
+quando o WAHA reentrega um webhook.

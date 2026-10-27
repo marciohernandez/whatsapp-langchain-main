@@ -32,24 +32,17 @@ Você verá todos os endpoints documentados com formulários interativos.
 
 ## Passo 2: Enviar uma Mensagem via Webhook
 
-1. No Swagger, localize **POST /webhook/twilio**
+1. No Swagger, localize **POST /webhook/waha**
 2. Clique em **Try it out**
 3. No campo `agent` (query param), digite: `rhawk_assistant`
-4. No corpo (form data), preencha:
+4. No corpo (JSON), preencha:
 
-| Campo | Valor |
-|---|---|
-| `MessageSid` | `SM_TESTE_001` |
-| `From` | `whatsapp:+5511999990001` |
-| `To` | `whatsapp:+14155238886` |
-| `Body` | `Olá! O que vocês fazem?` |
-| `NumMedia` | `0` |
+```json
+{"event":"message","payload":{"id":"false_TESTE_001","from":"5511999990001@c.us","fromMe":false,"body":"Olá! O que vocês fazem?"}}
+```
 
 5. Clique em **Execute**
-6. A resposta deve ser **200** com TwiML vazio:
-   ```xml
-   <?xml version="1.0" encoding="UTF-8"?><Response></Response>
-   ```
+6. A resposta deve ser **200** com `{"status":"queued"}`
 
 > O 200 significa apenas que a mensagem foi **enfileirada**. O processamento
 > acontece no Worker em background.
